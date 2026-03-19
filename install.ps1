@@ -37,7 +37,12 @@
     卸载所有已安装的 C 环境组件。
 .NOTES
     作者: YourName
-    版本: 1.2
+    版本: 1.3
+    更新内容:
+        - 增强 PATH 管理：添加条目前去重，备份 PATH 以便恢复
+        - 组件安装前检测是否已存在，避免重复安装
+        - 卸载时提供恢复环境变量的选项
+        - 改进错误处理和网络检测
 #>
 
 param(
@@ -58,6 +63,7 @@ param(
 # ---------- 初始化 ----------
 $script:LogFile = "$PSScriptRoot\install.log"
 $script:BackupDir = "$PSScriptRoot\backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+$script:EnvBackupFile = "$script:BackupDir\env_backup.ps1"
 
 function Write-Log {
     param([string]$Message)
@@ -77,11 +83,114 @@ function Throw-Error {
     throw $Message
 }
 
-# ---------- 刷新环境变量 ----------
+# ---------- 网络检测与重试 ----------
+function Test-Network {
+    $testHosts = @("google.com", "github.com", "chocolatey.org")
+    foreach ($hostName in $testHosts) {
+        if (Test-Connection -ComputerName $hostName -Count 1 -Quiet) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Invoke-WithRetry {
+    param(
+        [scriptblock]$ScriptBlock,
+        [string]$ErrorMessage = "操作失败",
+        [int]$Retries = 3
+    )
+    $attempt = 0
+    while ($attempt -lt $Retries) {
+        $attempt++
+        try {
+            & $ScriptBlock
+            return
+        } catch {
+            Write-WarningLog "尝试 $attempt/$Retries 失败: $_"
+            if ($attempt -eq $Retries) {
+                Throw-Error "$ErrorMessage"
+            }
+            Start-Sleep -Seconds 2
+        }
+    }
+}
+
+# ---------- PATH 管理（用户级别，去重） ----------
+function Get-UserPath {
+    return [System.Environment]::GetEnvironmentVariable("Path", "User")
+}
+
+function Set-UserPath {
+    param([string]$NewPath)
+    [System.Environment]::SetEnvironmentVariable("Path", $NewPath, "User")
+    # 同时更新当前会话 PATH
+    $env:Path = ([System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + $NewPath)
+}
+
+function Add-PathUser {
+    param([string]$PathToAdd)
+    if (-not (Test-Path $PathToAdd -PathType Container)) {
+        Write-WarningLog "路径 $PathToAdd 不存在，跳过添加到 PATH"
+        return
+    }
+    $currentPath = Get-UserPath
+    $paths = $currentPath -split ';' | Where-Object { $_ -ne '' }
+    if ($paths -contains $PathToAdd) {
+        Write-Log "路径 $PathToAdd 已在用户 PATH 中"
+        return
+    }
+    # 备份当前 PATH
+    Backup-EnvVars
+    $newPath = if ($currentPath) { $currentPath + ";" + $PathToAdd } else { $PathToAdd }
+    Set-UserPath $newPath
+    Write-Log "已将 $PathToAdd 添加到用户 PATH"
+}
+
+function Remove-PathUser {
+    param([string]$PathToRemove)
+    $currentPath = Get-UserPath
+    $paths = $currentPath -split ';' | Where-Object { $_ -ne '' }
+    if ($paths -notcontains $PathToRemove) {
+        Write-Log "路径 $PathToRemove 不在用户 PATH 中，无需移除"
+        return
+    }
+    $newPaths = $paths | Where-Object { $_ -ne $PathToRemove }
+    $newPath = $newPaths -join ';'
+    Set-UserPath $newPath
+    Write-Log "已将 $PathToRemove 从用户 PATH 移除"
+}
+
+# ---------- 环境变量备份与恢复 ----------
+function Backup-EnvVars {
+    if (-not (Test-Path $script:BackupDir)) {
+        New-Item -ItemType Directory -Path $script:BackupDir -Force | Out-Null
+    }
+    $userPath = Get-UserPath
+    @"
+# 环境变量备份 - $(Get-Date)
+`$env:UserPathBefore = "$userPath"
+"@ | Set-Content -Path $script:EnvBackupFile
+    Write-Log "用户 PATH 已备份到 $script:EnvBackupFile"
+}
+
+function Restore-EnvVars {
+    if (Test-Path $script:EnvBackupFile) {
+        . $script:EnvBackupFile  # 点执行，加载备份的变量
+        if ($env:UserPathBefore) {
+            Set-UserPath $env:UserPathBefore
+            Write-Log "已从备份恢复用户 PATH"
+        }
+    } else {
+        Write-WarningLog "未找到环境变量备份，无法恢复"
+    }
+}
+
+# ---------- 刷新当前会话 PATH ----------
 function Update-SessionPath {
     $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
     $userPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
-    $env:Path = "$machinePath;$userPath;$env:Path"
+    $env:Path = "$machinePath;$userPath"
     Write-Log "已刷新当前会话的 PATH 环境变量"
 }
 
@@ -105,8 +214,12 @@ if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdent
 }
 
 # ---------- 网络检查 ----------
-if (-not (Test-Connection -ComputerName google.com -Count 1 -Quiet)) {
-    Write-Warning "网络连接可能有问题，安装 Chocolatey 需要联网。"
+if (-not (Test-Network)) {
+    Write-Warning "网络连接似乎有问题，安装过程可能失败。建议检查网络后重试。"
+    $continue = Read-Host "是否仍要继续？(y/N)"
+    if ($continue -notmatch '^[Yy]') {
+        exit
+    }
 }
 
 # ---------- 帮助信息 ----------
@@ -133,8 +246,9 @@ function Install-Chocolatey {
         Write-Log "Chocolatey 未安装，正在安装..."
         Set-ExecutionPolicy Bypass -Scope Process -Force
         [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-        Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-        if ($LASTEXITCODE -ne 0) { Throw-Error "Chocolatey 安装失败" }
+        Invoke-WithRetry -ScriptBlock {
+            Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+        } -ErrorMessage "Chocolatey 安装失败"
         refreshenv
         Update-SessionPath
         Write-Log "Chocolatey 安装完成"
@@ -143,29 +257,46 @@ function Install-Chocolatey {
     }
 }
 
-# ---------- 组件安装 ----------
+# ---------- 组件安装（带检测） ----------
 function Install-Compiler {
+    if (Get-Command gcc -ErrorAction SilentlyContinue) {
+        $version = & gcc --version | Select-Object -First 1
+        Write-Log "检测到已安装编译器: $version，跳过安装"
+        return
+    }
     Write-Log "安装 MinGW (gcc, g++, make)..."
-    choco install mingw -y
+    Invoke-WithRetry -ScriptBlock {
+        choco install mingw -y
+    } -ErrorMessage "MinGW 安装失败"
     if ($LASTEXITCODE -ne 0) { Throw-Error "MinGW 安装失败" }
     Update-SessionPath
+    # 将 MinGW bin 目录添加到 PATH（Chocolatey 通常会自动添加，但确保一下）
+    $mingwBin = "C:\ProgramData\mingw64\mingw64\bin"
+    if (Test-Path $mingwBin) {
+        Add-PathUser $mingwBin
+    }
     Write-Log "编译器安装完成"
 }
 
 function Install-BuildTools {
-    if (-not (Get-Command make -ErrorAction SilentlyContinue)) {
-        Write-Log "安装 make..."
-        choco install make -y
-        if ($LASTEXITCODE -ne 0) { Throw-Error "make 安装失败" }
-        Update-SessionPath
-    } else {
-        Write-Log "make 已安装"
+    if (Get-Command make -ErrorAction SilentlyContinue) {
+        $version = & make --version | Select-Object -First 1
+        Write-Log "检测到已安装 make: $version，跳过安装"
+        return
     }
+    Write-Log "安装 make..."
+    Invoke-WithRetry -ScriptBlock {
+        choco install make -y
+    } -ErrorMessage "make 安装失败"
+    if ($LASTEXITCODE -ne 0) { Throw-Error "make 安装失败" }
+    Update-SessionPath
+    Write-Log "make 安装完成"
 }
 
 function Install-Debugger {
     if (Get-Command gdb -ErrorAction SilentlyContinue) {
-        Write-Log "gdb 已存在于系统中"
+        $version = & gdb --version | Select-Object -First 1
+        Write-Log "检测到已安装 gdb: $version，跳过安装"
         return
     }
 
@@ -180,8 +311,7 @@ function Install-Debugger {
         if (Test-Path $path) {
             $gdbDir = Split-Path $path -Parent
             Write-Log "在 $gdbDir 找到 gdb，正在将其添加到用户 PATH..."
-            $env:Path = "$gdbDir;$env:Path"
-            [System.Environment]::SetEnvironmentVariable("Path", "$gdbDir;" + [System.Environment]::GetEnvironmentVariable("Path", "User"), "User")
+            Add-PathUser $gdbDir
             $foundGdb = $true
             break
         }
@@ -189,7 +319,9 @@ function Install-Debugger {
 
     if (-not $foundGdb) {
         Write-WarningLog "未找到已安装的 gdb，尝试通过 Chocolatey 安装..."
-        choco install gdb -y
+        Invoke-WithRetry -ScriptBlock {
+            choco install gdb -y
+        } -ErrorMessage "Chocolatey 安装 gdb 失败" -Retries 1  # 只试一次，因为可能包不存在
         if ($LASTEXITCODE -ne 0) {
             Write-WarningLog "Chocolatey 安装 gdb 失败，请手动安装 gdb 或使用其他调试器。"
             return
@@ -324,12 +456,13 @@ function Setup-VSCode {
     $codePath = Get-Command code -ErrorAction SilentlyContinue
     if (-not $codePath) {
         Write-Log "Visual Studio Code 未安装，正在通过 Chocolatey 安装..."
-        choco install vscode -y
+        Invoke-WithRetry -ScriptBlock {
+            choco install vscode -y
+        } -ErrorMessage "VSCode 安装失败"
         if ($LASTEXITCODE -ne 0) {
             Throw-Error "VSCode 安装失败"
         }
         Update-SessionPath
-        # 刷新后再次检查
         $codePath = Get-Command code -ErrorAction SilentlyContinue
         if (-not $codePath) {
             Throw-Error "VSCode 安装后仍无法找到 'code' 命令，请尝试重新打开终端。"
@@ -340,7 +473,7 @@ function Setup-VSCode {
 
     # 安装 C/C++ 扩展
     Write-Log "正在安装 C/C++ 扩展..."
-    code --install-extension ms-vscode.cpptools --force
+    $extResult = code --install-extension ms-vscode.cpptools --force
     if ($LASTEXITCODE -ne 0) {
         Write-WarningLog "C/C++ 扩展安装失败，请手动安装。"
     } else {
@@ -420,11 +553,12 @@ function Remove-CEnv {
         return
     }
 
-    # 备份 profile
+    # 备份 profile 和环境变量
     $profilePath = $PROFILE.CurrentUserAllHosts
     if (Test-Path $profilePath) {
         Backup-File $profilePath
     }
+    Backup-EnvVars
 
     # 卸载 Chocolatey 包
     $packages = @("mingw", "make", "gdb")
@@ -454,9 +588,14 @@ function Remove-CEnv {
         }
     }
 
-    # 提示用户手动检查 PATH（可选）
-    Write-Log "环境变量 PATH 可能需要手动清理残留的 MinGW 路径（例如 C:\ProgramData\mingw64\...）。"
-    Write-Host "卸载完成。建议重启 PowerShell 以确保环境变量更新。" -ForegroundColor Green
+    # 提示用户是否要恢复 PATH 备份
+    $restorePath = Read-Host "是否要恢复之前的 PATH 环境变量？(y/N)"
+    if ($restorePath -match '^[Yy]') {
+        Restore-EnvVars
+    }
+
+    Write-Log "卸载完成。建议重启 PowerShell 以确保环境变量更新。"
+    Write-Host "卸载完成。建议重启 PowerShell。" -ForegroundColor Green
 }
 
 # ---------- 交互菜单 ----------
