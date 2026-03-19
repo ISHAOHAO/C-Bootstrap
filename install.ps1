@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Windows 一键安装/配置/卸载 C 语言开发环境 (MinGW + make + gdb + VSCode)
 .DESCRIPTION
