@@ -25,25 +25,38 @@
 
 ### Windows（PowerShell）
 
-> ⚠️ 必须以 **管理员身份** 运行 PowerShell
+> ⚠️ **必须以管理员身份运行 PowerShell**  
+> 右键点击开始菜单中的 PowerShell 图标，选择“以管理员身份运行”。
 
-#### 方法一：一键远程运行
+#### ✅ 方法一：一键远程运行（推荐，完美支持中文）
 
-复制并粘贴以下命令到 PowerShell 中执行：
-
-```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/ISHAOHAO/C-Bootstrap/main/install.ps1'))
-```
-
-如果上述地址被屏蔽（如网络服务提供商/DNS 阻止），请尝试镜像：
+此命令使用 `Invoke-WebRequest` 并指定 `-UseBasicParsing`，能正确处理 UTF-8 编码，避免乱码问题。
 
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; iex ((New-Object System.Net.WebClient).DownloadString('https://gitee.com/is-haohao/C-Bootstrap/raw/main/install.ps1'))
+Set-ExecutionPolicy Bypass -Scope Process -Force; iex ((Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/ISHAOHAO/C-Bootstrap/main/install.ps1' -UseBasicParsing).Content)
 ```
 
-#### 方法二：本地运行
+如果 GitHub 访问不畅，请使用 Gitee 镜像：
 
-1. 下载 `install.ps1` 脚本到本地（可从 [GitHub Release](https://github.com/ISHAOHAO/C-Bootstrap/releases) 获取）。
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force; iex ((Invoke-WebRequest -Uri 'https://gitee.com/is-haohao/C-Bootstrap/raw/main/install.ps1' -UseBasicParsing).Content)
+```
+
+#### 📥 方法二：下载到临时文件后执行（100% 可靠备选）
+
+如果方法一仍出现意外错误，可采用此方式：
+
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force
+$scriptPath = "$env:TEMP\install.ps1"
+(New-Object System.Net.WebClient).DownloadFile('https://raw.githubusercontent.com/ISHAOHAO/C-Bootstrap/main/install.ps1', $scriptPath)
+$scriptContent = Get-Content -Path $scriptPath -Raw -Encoding UTF8
+Invoke-Expression $scriptContent
+```
+
+#### 💻 方法三：本地运行
+
+1. 从 [GitHub Release](https://github.com/ISHAOHAO/C-Bootstrap/releases) 下载 `install.ps1` 脚本到本地。
 2. 以管理员身份打开 PowerShell，导航到脚本所在目录。
 3. 执行：
 
@@ -51,6 +64,8 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; iex ((New-Object System.Net.We
 Set-ExecutionPolicy Bypass -Scope Process -Force
 .\install.ps1
 ```
+
+---
 
 ### 使用命令行直接安装（静默模式）
 
