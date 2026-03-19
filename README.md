@@ -32,18 +32,18 @@
 复制并粘贴以下命令到 PowerShell 中执行：
 
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Text.Encoding]::UTF8.GetString((New-Object System.Net.WebClient).DownloadData('https://raw.githubusercontent.com/ISHAOHAO/C-Bootstrap/main/install.ps1')) | iex
+Set-ExecutionPolicy Bypass -Scope Process -Force; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/ISHAOHAO/C-Bootstrap/main/install.ps1'))
 ```
 
-如果上述地址被屏蔽，可使用镜像：
+如果上述地址被屏蔽（如网络服务提供商/DNS 阻止），请尝试镜像：
 
 ```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Text.Encoding]::UTF8.GetString((New-Object System.Net.WebClient).DownloadData('https://gitee.com/yourusername/C-Bootstrap/raw/main/install.ps1')) | iex
+Set-ExecutionPolicy Bypass -Scope Process -Force; iex ((New-Object System.Net.WebClient).DownloadString('https://gitee.com/is-haohao/C-Bootstrap/raw/main/install.ps1'))
 ```
 
 #### 方法二：本地运行
 
-1. 下载 `install.ps1` 脚本到本地。
+1. 下载 `install.ps1` 脚本到本地（可从 [GitHub Release](https://github.com/ISHAOHAO/C-Bootstrap/releases) 获取）。
 2. 以管理员身份打开 PowerShell，导航到脚本所在目录。
 3. 执行：
 
@@ -162,25 +162,31 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 
 欢迎提交 Issue 或 Pull Request！
 
-### 开发环境
-
-```powershell
-git clone https://github.com/yourusername/C-Bootstrap.git
-cd C-Bootstrap
-# 以管理员身份运行 PowerShell 进行测试
-```
-
-### 贡献指南
-
-请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)（如有）了解详情。
-
 ### 报告问题
 
-如果遇到任何问题，请在 [Issues](https://github.com/yourusername/C-Bootstrap/issues) 页面提交，并提供：
+如果你在使用中遇到任何问题，请在 [Issues](https://github.com/ISHAOHAO/C-Bootstrap/issues) 页面提交，并提供：
 
 - Windows 版本
 - PowerShell 版本（`$PSVersionTable.PSVersion`）
 - 执行的命令和错误日志（位于脚本同目录下的 `install.log`）
+
+### 贡献代码
+
+1. Fork 本仓库。
+2. 创建你的特性分支 (`git checkout -b feature/AmazingFeature`)。
+3. 提交你的改动 (`git commit -m 'Add some AmazingFeature'`)。
+4. 推送到分支 (`git push origin feature/AmazingFeature`)。
+5. 打开一个 Pull Request。
+
+请确保代码符合 [PowerShell 最佳实践](https://docs.microsoft.com/en-us/powershell/scripting/developer/windows-powershell)，并添加适当的注释。
+
+### 开发环境设置
+
+- 克隆仓库到本地。
+- 以管理员身份打开 PowerShell，导航到项目目录。
+- 修改脚本并测试（建议在虚拟机或测试环境中进行）。
+
+详细的贡献指南请参阅 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ---
 
